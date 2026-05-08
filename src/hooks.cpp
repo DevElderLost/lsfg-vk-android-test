@@ -150,7 +150,9 @@ namespace {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         // enforce present mode
-        createInfo.presentMode = (Config::activeConf.pacingMode != Config::PacingMode::NONE) ? VK_PRESENT_MODE_IMMEDIATE_KHR : Config::activeConf.e_present;
+        if (Config::activeConf.e_present != VK_PRESENT_MODE_MAX_ENUM_KHR) {
+            createInfo.presentMode = Config::activeConf.e_present;
+        }
         // retire potential old swapchain
         if (pCreateInfo->oldSwapchain) {
             swapchains.erase(pCreateInfo->oldSwapchain);
@@ -270,10 +272,10 @@ namespace {
             }
 
             // ensure present mode is still valid
-            if (present != conf.e_present) {
-                Layer::ovkQueuePresentKHR(queue, pPresentInfo);
-                return VK_ERROR_OUT_OF_DATE_KHR;
-            }
+//            if (present != conf.e_present) {
+//                Layer::ovkQueuePresentKHR(queue, pPresentInfo);
+//                return VK_ERROR_OUT_OF_DATE_KHR;
+//            }
 
             // skip if disabled
             if (conf.multiplier <= 1)
