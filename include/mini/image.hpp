@@ -51,8 +51,8 @@ namespace Mini {
         /// @throws LSFG::vulkan_error if object creation fails.
         ///
         Image(VkDevice device, VkPhysicalDevice physicalDevice, VkExtent2D extent, VkFormat format,
-            VkImageUsageFlags usage, VkImageAspectFlags aspectFlags);
-
+              VkImageUsageFlags usage, VkImageAspectFlags aspectFlags,
+              VkMemoryPropertyFlags preferredMemProps = 0);
         /// Get the AHardwareBuffer handle (Android only).
         [[nodiscard]] AHardwareBuffer* getAhb() const { return this->ahb; }
 #endif
