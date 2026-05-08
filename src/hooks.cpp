@@ -150,8 +150,7 @@ namespace {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         // enforce present mode
-        createInfo.presentMode = Config::activeConf.e_present;
-
+        createInfo.presentMode = (Config::activeConf.pacingMode != Config::PacingMode::NONE) ? VK_PRESENT_MODE_IMMEDIATE_KHR : Config::activeConf.e_present;
         // retire potential old swapchain
         if (pCreateInfo->oldSwapchain) {
             swapchains.erase(pCreateInfo->oldSwapchain);
