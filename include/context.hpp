@@ -87,4 +87,5 @@ private:
         std::vector<Mini::Semaphore> prevPostCopySemaphores; // signal for previous postCopyBuf
     }; // data for a single render pass
     std::array<RenderPassInfo, 8> passInfos; // allocate 8 because why not
+    bool passInfosInitialized{false};
 };
