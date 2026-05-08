@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <chrono>
 
 ///
 /// This class is the frame generation context. There should be one instance per swapchain.
@@ -68,6 +69,10 @@ private:
 
     Mini::CommandPool cmdPool;
     uint64_t frameIdx{0};
+
+    // Pacing state
+    std::chrono::steady_clock::time_point lastPresentTime{};
+    std::chrono::nanoseconds measuredFrameInterval{16'666'667};
 
     struct RenderPassInfo {
         Mini::CommandBuffer preCopyBuf; // copy from swapchain image to frame_0/frame_1
