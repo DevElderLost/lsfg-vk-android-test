@@ -33,7 +33,7 @@ enum class PacingMode {
         bool hdr{false};
 
         /// Experimental flag for overriding the synchronization method.
-        VkPresentModeKHR e_present;
+        VkPresentModeKHR e_present{VK_PRESENT_MODE_MAX_ENUM_KHR};
 
         PacingMode pacingMode{PacingMode::NONE};
 
