@@ -117,15 +117,22 @@ Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
 }
 
 #ifdef __ANDROID__
+
 Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
-        VkExtent2D extent, VkFormat format,
-        VkImageUsageFlags usage, VkImageAspectFlags aspectFlags)
-        : extent(extent), format(format), aspectFlags(aspectFlags) {
+             VkExtent2D extent, VkFormat format,
+             VkImageUsageFlags usage, VkImageAspectFlags aspectFlags,
+             VkMemoryPropertyFlags preferredMemProps)  // ← tambah parameter
+    : extent(extent), format(format), aspectFlags(aspectFlags) {
+
     // Convert VkFormat to AHardwareBuffer format
     uint32_t ahbFormat = 0;
     switch (format) {
-        case VK_FORMAT_R8G8B8A8_UNORM:        ahbFormat = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM; break;
-        case VK_FORMAT_R16G16B16A16_SFLOAT:   ahbFormat = AHARDWAREBUFFER_FORMAT_R16G16B16A16_FLOAT; break;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+            ahbFormat = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+            break;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            ahbFormat = AHARDWAREBUFFER_FORMAT_R16G16B16A16_FLOAT;
+            break;
         default:
             throw LSFG::vulkan_error(VK_ERROR_FORMAT_NOT_SUPPORTED,
                 "Unsupported VkFormat for AHB allocation");
@@ -133,99 +140,119 @@ Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
 
     // Allocate AHardwareBuffer
     AHardwareBuffer_Desc ahbDesc{
-        .width = extent.width,
+        .width  = extent.width,
         .height = extent.height,
         .layers = 1,
         .format = ahbFormat,
-        .usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE
-               | AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
-               | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+        .usage  = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE
+                | AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
+                | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
         .stride = 0,
-        .rfu0 = 0,
-        .rfu1 = 0,
+        .rfu0   = 0,
+        .rfu1   = 0,
     };
+
     AHardwareBuffer* ahbHandle{};
     if (AHardwareBuffer_allocate(&ahbDesc, &ahbHandle) != 0 || ahbHandle == nullptr)
         throw LSFG::vulkan_error(VK_ERROR_OUT_OF_DEVICE_MEMORY,
             "Failed to allocate AHardwareBuffer for image");
+
     this->ahb = ahbHandle;
 
-    // Create VkImage wrapping the AHB external memory.
-    // NOTE: We skip vkGetAndroidHardwareBufferPropertiesANDROID because
-    // the Vortek ICD wrapper doesn't pass it through. Instead we use
-    // vkGetImageMemoryRequirements after image creation to get the
-    // allocation size and memory type bits.
+    // Create VkImage wrapping the AHB external memory
     VkExternalMemoryImageCreateInfo extImageInfo{
-        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .sType       = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
         .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID,
     };
+
     VkImageCreateInfo desc{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext = &extImageInfo,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = format,
-        .extent = { extent.width, extent.height, 1 },
-        .mipLevels = 1,
+        .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext       = &extImageInfo,
+        .imageType   = VK_IMAGE_TYPE_2D,
+        .format      = format,
+        .extent      = { extent.width, extent.height, 1 },
+        .mipLevels   = 1,
         .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT
-               | VK_IMAGE_USAGE_STORAGE_BIT
-               | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
-               | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .samples     = VK_SAMPLE_COUNT_1_BIT,
+        .tiling      = VK_IMAGE_TILING_OPTIMAL,
+        .usage       = VK_IMAGE_USAGE_SAMPLED_BIT
+                     | VK_IMAGE_USAGE_STORAGE_BIT
+                     | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                     | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
+
     VkImage imageHandle{};
     auto res = Layer::ovkCreateImage(device, &desc, nullptr, &imageHandle);
     if (res != VK_SUCCESS || imageHandle == VK_NULL_HANDLE)
         throw LSFG::vulkan_error(res, "Failed to create Vulkan image from AHB");
 
-    // Get memory requirements from the image — this gives us allocationSize
-    // and memoryTypeBits without needing vkGetAndroidHardwareBufferPropertiesANDROID.
+    // Get memory requirements
     VkMemoryRequirements memReqs;
     Layer::ovkGetImageMemoryRequirements(device, imageHandle, &memReqs);
 
-    // Find a compatible device-local memory type from the requirements
     VkPhysicalDeviceMemoryProperties memProps;
     Layer::ovkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
 
-    uint32_t typeIndex = UINT32_MAX;
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((memReqs.memoryTypeBits & (1u << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-            typeIndex = i;
-            break;
+    // ── LOGIKA BARU: coba preferredMemProps dulu, fallback ke DEVICE_LOCAL ──
+    // Helper lambda untuk mencari memory type yang cocok
+    auto findMemType = [&](VkMemoryPropertyFlags required,
+                           VkMemoryPropertyFlags preferred) -> uint32_t {
+        // Pass 1: cari yang cocok dengan preferred flags
+        if (preferred != 0) {
+            for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+                if ((memReqs.memoryTypeBits & (1u << i)) &&
+                    (memProps.memoryTypes[i].propertyFlags & preferred) == preferred) {
+                    return i;
+                }
+            }
+            // preferred tidak ditemukan — log fallback
+            __android_log_print(ANDROID_LOG_WARN, "lsfg-vk",
+                "preferredMemProps 0x%X not supported, falling back", preferred);
         }
-    }
-    if (typeIndex == UINT32_MAX) {
-        // Fallback: pick first compatible type (may not be device-local)
+        // Pass 2: fallback ke required flags (DEVICE_LOCAL)
         for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-            if (memReqs.memoryTypeBits & (1u << i)) {
-                typeIndex = i;
-                break;
+            if ((memReqs.memoryTypeBits & (1u << i)) &&
+                (memProps.memoryTypes[i].propertyFlags & required) == required) {
+                return i;
             }
         }
-    }
-    if (typeIndex == UINT32_MAX)
-        throw LSFG::vulkan_error(VK_ERROR_UNKNOWN, "No memory type matches AHB image requirements");
+        // Pass 3: last resort — ambil type apapun yang kompatibel
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if (memReqs.memoryTypeBits & (1u << i)) {
+                return i;
+            }
+        }
+        throw LSFG::vulkan_error(VK_ERROR_UNKNOWN,
+            "No memory type matches AHB image requirements");
+    };
 
-    // Import AHB into Vulkan memory with dedicated allocation for the image
+    uint32_t typeIndex = findMemType(
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,  // required (fallback)
+        preferredMemProps                       // preferred (misal LAZILY_ALLOCATED)
+    );
+    // ── AKHIR LOGIKA BARU ──
+
+    // Import AHB into Vulkan memory with dedicated allocation
     VkMemoryDedicatedAllocateInfo dedicatedInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
         .image = imageHandle,
     };
+
     VkImportAndroidHardwareBufferInfoANDROID importInfo{
-        .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
-        .pNext = &dedicatedInfo,
+        .sType  = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
+        .pNext  = &dedicatedInfo,
         .buffer = ahbHandle,
     };
+
     VkMemoryAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &importInfo,
-        .allocationSize = memReqs.size,
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext           = &importInfo,
+        .allocationSize  = memReqs.size,
         .memoryTypeIndex = typeIndex,
     };
+
     VkDeviceMemory memoryHandle{};
     res = Layer::ovkAllocateMemory(device, &allocInfo, nullptr, &memoryHandle);
     if (res != VK_SUCCESS || memoryHandle == VK_NULL_HANDLE)
@@ -242,13 +269,15 @@ Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
             Layer::ovkDestroyImage(dev, *img, nullptr);
         }
     );
+
     this->memory = std::shared_ptr<VkDeviceMemory>(
         new VkDeviceMemory(memoryHandle),
         [dev = device](VkDeviceMemory* mem) {
             Layer::ovkFreeMemory(dev, *mem, nullptr);
         }
     );
-    // Shared ownership of the AHB — released when last reference dies
+
+    // Shared ownership of the AHB
     this->ahbRef = std::shared_ptr<AHardwareBuffer>(
         ahbHandle,
         [](AHardwareBuffer* b) {
@@ -256,5 +285,5 @@ Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
         }
     );
 }
-#endif
 
+#endif
