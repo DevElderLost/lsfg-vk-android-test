@@ -40,6 +40,12 @@ namespace {
             return VkPresentModeKHR::VK_PRESENT_MODE_IMMEDIATE_KHR;
         return VkPresentModeKHR::VK_PRESENT_MODE_FIFO_KHR;
     }
+
+    Config::PacingMode into_pacing(const std::string& mode) {
+    if (mode == "sleep")      return Config::PacingMode::SLEEP;
+    if (mode == "busy_wait")  return Config::PacingMode::BUSY_WAIT;
+    return Config::PacingMode::NONE;
+    }
 }
 
 void Config::updateConfig(const std::string& file) {
@@ -102,6 +108,7 @@ void Config::updateConfig(const std::string& file) {
             .performance = toml::find_or(gameTable, "performance_mode", false),
             .hdr = toml::find_or(gameTable, "hdr_mode", false),
             .e_present =   into_present(toml::find_or(gameTable, "experimental_present_mode", "")),
+            .pacingMode = into_pacing(toml::find_or(gameTable, "pacing_mode", std::string())),
             .config_file = file,
             .timestamp = global.timestamp
         };
@@ -141,6 +148,8 @@ Configuration Config::getConfig(const std::pair<std::string, std::string>& name)
         if (hdr) conf.hdr = std::string(hdr) == "1";
         const char* e_present = std::getenv("LSFG_EXPERIMENTAL_PRESENT_MODE");
         if (e_present) conf.e_present = into_present(std::string(e_present));
+        const char* pacing = std::getenv("LSFGVK_PACING");
+        if (pacing) conf.pacingMode = into_pacing(std::string(pacing));
 
         return conf;
     }
