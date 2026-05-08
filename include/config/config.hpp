@@ -6,8 +6,15 @@
 #include <chrono>
 #include <cstddef>
 #include <string>
+#include <cstdint>
 
 namespace Config {
+
+enum class PacingMode {
+    NONE,       // perilaku sekarang: serahkan ke compositor via FIFO
+    SLEEP,      // sleep_until() per slot waktu generated frame
+    BUSY_WAIT,  // spinning yield() presisi tinggi
+};
 
     /// lsfg-vk configuration
     struct Configuration {
@@ -27,6 +34,8 @@ namespace Config {
 
         /// Experimental flag for overriding the synchronization method.
         VkPresentModeKHR e_present;
+
+        PacingMode pacingMode{PacingMode::NONE};
 
         /// Path to the configuration file.
         std::filesystem::path config_file;
