@@ -208,8 +208,7 @@ Image::Image(VkDevice device, VkPhysicalDevice physicalDevice,
                 }
             }
             // preferred tidak ditemukan — log fallback
-            __android_log_print(ANDROID_LOG_WARN, "lsfg-vk",
-                "preferredMemProps 0x%X not supported, falling back", preferred);
+            std::cerr << "lsfg-vk: preferredMemProps 0x" << std::hex << preferred << std::dec << " not supported, falling back\n";
         }
         // Pass 2: fallback ke required flags (DEVICE_LOCAL)
         for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
